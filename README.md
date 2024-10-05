@@ -1,2 +1,2 @@
 # finder-app
-Finder Application using Java and Python
+Face Detection and Embedding Application using Java and Python
