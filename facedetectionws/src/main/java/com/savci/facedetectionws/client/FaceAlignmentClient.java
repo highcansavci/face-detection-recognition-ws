@@ -5,6 +5,8 @@ import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.BinaryWebSocketHandler;
 
+import jakarta.websocket.ContainerProvider;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -34,6 +36,19 @@ public class FaceAlignmentClient implements Closeable {
             LOGGER.info("Initializing WebSocket client for URL: " + url);
             WebSocketClient client = new StandardWebSocketClient();
             WebSocketHandler handler = new BinaryWebSocketHandler() {
+                @Override
+                public void afterConnectionEstablished(WebSocketSession session) {
+                    LOGGER.info("WebSocket connection established with ID: " + session.getId());
+                    session.setTextMessageSizeLimit(1048576);
+                    session.setBinaryMessageSizeLimit(1048576);
+                }
+
+                @Override
+                public void handleTransportError(WebSocketSession session, Throwable exception) {
+                    LOGGER.severe("Transport error: " + exception.getMessage());
+                    exception.printStackTrace();
+                }
+
                 @Override
                 public void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
                     try {
@@ -141,7 +156,7 @@ public class FaceAlignmentClient implements Closeable {
     public static void main(String[] args) {
         try (FaceAlignmentClient client = new FaceAlignmentClient("ws://localhost:8888/align")) {
             LOGGER.info("Reading image file...");
-            String imagePath = "facedetectionws/src/main/java/com/savci/facedetectionws/client/image.png";
+            String imagePath = "facedetectionws/src/main/java/com/savci/facedetectionws/client/can.png";
             byte[] imageData = Files.readAllBytes(Paths.get(imagePath));
             LOGGER.info("Image file read successfully, size: " + imageData.length);
 

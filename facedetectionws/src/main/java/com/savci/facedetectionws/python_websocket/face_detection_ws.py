@@ -63,8 +63,15 @@ class FaceAlignmentHandler(tornado.websocket.WebSocketHandler):
             for idx, face_obj in enumerate(face_objs):
                 aligned_face = face_obj['face']
                 logger.debug(f"Processing face {idx + 1}, shape: {aligned_face.shape}")
+
+                # Ensure aligned face is in uint8 format
+                if aligned_face.dtype != np.uint8:
+                    aligned_face = cv2.normalize(aligned_face, None, 0, 255, cv2.NORM_MINMAX)
+                    aligned_face = aligned_face.astype(np.uint8)
+
+                aligned_face_bgr = cv2.cvtColor(aligned_face, cv2.COLOR_RGB2BGR)
                 
-                is_success, buffer = cv2.imencode(".png", aligned_face)
+                is_success, buffer = cv2.imencode(".png", aligned_face_bgr)
                 if not is_success:
                     raise ValueError(f"Failed to encode face {idx + 1}")
                 
@@ -85,9 +92,6 @@ class FaceAlignmentHandler(tornado.websocket.WebSocketHandler):
             error_msg = f"Error processing image: {str(e)}\n{traceback.format_exc()}"
             logger.error(error_msg)
             await self.write_message(f"Error: {str(e)}")
-
-    def on_close(self):
-        logger.info("WebSocket connection closed")
 
 def make_app():
     return tornado.web.Application([
