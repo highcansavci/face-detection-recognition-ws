@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class FaceAlignmentHandler(tornado.websocket.WebSocketHandler):
+class FaceRecognitionHandler(tornado.websocket.WebSocketHandler):
     executor = ThreadPoolExecutor(max_workers=4)
     
     def initialize(self) -> None:
@@ -38,29 +38,30 @@ class FaceAlignmentHandler(tornado.websocket.WebSocketHandler):
             except Exception as e:
                 error_msg = f"Error processing image: {str(e)}"
                 logger.error(f"{error_msg}\n{traceback.format_exc()}")
-                await self.write_message(f"Error: {str(e)}")
+                # Send error as text message
+                await self.write_message(error_msg)
                 
     async def _process_message(self, message: bytes) -> None:
-        # Extract message ID
+        # Extract message ID and image data
         message_id = struct.unpack('!Q', message[:8])[0]
         logger.info(f"Processing message ID: {message_id}")
         
         # Process image in thread pool
         img = await self._decode_image(message[8:])
-        face_objs = await self._detect_faces(img)
+        embedding = await self._get_embedding(img)
         
-        if not face_objs:
-            raise ValueError("No faces detected")
+        if embedding is None:
+            raise ValueError("Failed to generate embedding")
         
-        # Prepare response
-        response = await self._prepare_response(message_id, face_objs)
+        # Prepare response with message ID and embedding
+        response = await self._prepare_response(message_id, embedding)
         
         # Send response
         await self.write_message(response, binary=True)
         logger.info(f"Response sent for message ID: {message_id}")
         
         # Clean up
-        del img, face_objs
+        del img, embedding
         gc.collect()
 
     async def _decode_image(self, image_data: bytes) -> np.ndarray:
@@ -75,68 +76,48 @@ class FaceAlignmentHandler(tornado.websocket.WebSocketHandler):
             self.executor, _decode
         )
 
-    async def _detect_faces(self, img: np.ndarray) -> list:
-        def _detect():
-            return DeepFace.extract_faces(
+    async def _get_embedding(self, img: np.ndarray) -> np.ndarray:
+        def _embed():
+            embedding = DeepFace.represent(
                 img_path=img,
-                detector_backend='fastmtcnn',
+                model_name="Facenet",
+                detector_backend='retinaface',
                 enforce_detection=False,
                 align=True
             )
+            return np.array(embedding[0]['embedding'], dtype=np.float32)
             
         return await tornado.ioloop.IOLoop.current().run_in_executor(
-            self.executor, _detect
+            self.executor, _embed
         )
 
-    async def _prepare_response(self, message_id: int, face_objs: list) -> bytes:
+    async def _prepare_response(self, message_id: int, embedding: np.ndarray) -> bytes:
         def _prepare():
-            response_parts = [
-                struct.pack('!Q', message_id),
-                struct.pack('!I', len(face_objs))
-            ]
+            # Pack message ID and embedding into bytes
+            message_id_bytes = struct.pack('!Q', message_id)
+            embedding_bytes = embedding.tobytes()
+            embedding_size = struct.pack('!I', len(embedding_bytes))
             
-            for idx, face_obj in enumerate(face_objs):
-                aligned_face = self._normalize_face(face_obj['face'])
-                face_bytes = self._encode_face(aligned_face)
-                response_parts.extend([
-                    struct.pack('!I', len(face_bytes)),
-                    face_bytes
-                ])
-                
-            return b''.join(response_parts)
+            return message_id_bytes + embedding_size + embedding_bytes
             
         return await tornado.ioloop.IOLoop.current().run_in_executor(
             self.executor, _prepare
         )
-
-    @staticmethod
-    def _normalize_face(face: np.ndarray) -> np.ndarray:
-        if face.dtype != np.uint8:
-            face = cv2.normalize(face, None, 0, 255, cv2.NORM_MINMAX)
-            face = face.astype(np.uint8)
-        return cv2.cvtColor(face, cv2.COLOR_RGB2BGR)
-
-    @staticmethod
-    def _encode_face(face: np.ndarray) -> bytes:
-        success, buffer = cv2.imencode('.png', face)
-        if not success:
-            raise ValueError("Failed to encode face")
-        return buffer.tobytes()
 
     def on_close(self) -> None:
         logger.info("WebSocket connection closed")
 
 def make_app() -> tornado.web.Application:
     return tornado.web.Application([
-        (r"/align", FaceAlignmentHandler),
+        (r"/embed", FaceRecognitionHandler),
     ])
 
 if __name__ == "__main__":
     try:
         app = make_app()
-        port = 8888
+        port = 8889
         app.listen(port)
-        logger.info(f"Face alignment server started on ws://localhost:{port}/align")
+        logger.info(f"Face recognition server started on ws://localhost:{port}/embed")
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:
         logger.info("Server shutting down...")
