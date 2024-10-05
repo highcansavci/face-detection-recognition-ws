@@ -5,8 +5,6 @@ import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.BinaryWebSocketHandler;
 
-import jakarta.websocket.ContainerProvider;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
